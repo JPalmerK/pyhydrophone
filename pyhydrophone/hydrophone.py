@@ -4,6 +4,7 @@ import numpy as np
 import soundfile as sf
 import pandas as pd
 import scipy.interpolate
+from netCDF4 import Dataset
 
 try:
     import scipy.signal as sig
@@ -34,24 +35,14 @@ class Hydrophone:
     calibration_file : string or Path
         File where the frequency dependent sensitivity values for the calibration are
     """
-
     def __init__(self, name, model, serial_number, sensitivity, preamp_gain, Vpp, string_format, calibration_file=None,
                  **kwargs):
         self.name = name
         self.model = model
         self.serial_number = serial_number
-        try:
-            self.sensitivity = float(sensitivity)
-        except ValueError:
-            raise ValueError("Sensitivity must be an integer or float")
-        try:
-            self.preamp_gain = float(preamp_gain)
-        except ValueError:
-            raise ValueError("preamp_gain must be an integer or float")
-        try:
-            self.Vpp = float(Vpp)
-        except ValueError:
-            raise ValueError("Vpp must be an integer or float")
+        self.sensitivity = sensitivity
+        self.preamp_gain = preamp_gain
+        self.Vpp = Vpp
         self.string_format = string_format
         self.cal_freq = 250
         self.cal_value = 114
@@ -59,6 +50,7 @@ class Hydrophone:
         self.freq_cal = None
         if calibration_file is not None:
             self.get_freq_cal(**kwargs)
+        
 
     def get_name_datetime(self, date_string):
         """
@@ -158,7 +150,7 @@ class Hydrophone:
         mv = 10 ** (self.sensitivity / 20.0) * p_ref
         ma = 10 ** (self.preamp_gain / 20.0) * p_ref
         gain_upa = (self.Vpp / 2.0) / (mv * ma)
-        return 10 * np.log10(gain_upa ** 2)
+        return 10 * np.log10(gain_upa**2)
 
     def get_freq_cal(self, val='sensitivity', sep=',', freq_col_id=0, val_col_id=1, start_data_id=0):
         """
@@ -177,19 +169,36 @@ class Hydrophone:
         start_data_id : int
             Id of the first line with data (without title) in the file (starts with 0)
         """
+        if self.calibration_file.endswith('nc'):
+            print('NC file found looking for frequency and sensitivity variables')
+            data = Dataset(self.calibration_file, 'r')  # 'r' means read mode
 
-        if self.calibration_file.suffix == '.csv' or self.calibration_file.suffix == '.txt':
+            # Frequency and sensitivity response
+            freq = data.variables['frequency'][:]
+            sendb = data.variables['sensitivity'][:]
+            df = pd.DataFrame({'frequency': freq, 'Column2': sendb})
+            df.columns = ['frequency', val]
+            
+            
+        elif self.calibration_file.endswith('.csv' or '.txt'): #kjp edit
+        #if self.calibration_file.suffix == '.csv' or self.calibration_file.suffix == '.txt':
             df = pd.read_csv(self.calibration_file, sep=sep, header=None)
+            df = df.iloc[:, (i for i in range(len(df.columns)) if i == freq_col_id or i == val_col_id)]
+            df = df[start_data_id:]
+            df = df.dropna(subset=[df.columns[0]])
+            df = df.replace('[A-Za-z:]', '', regex=True).astype(float)
+            df = df.reset_index(drop=True)
+            df.columns = ['frequency', val]
 
-        elif self.calibration_file.suffix == '.xlsx':
+        elif self.calibration_file.endswith('.xlsx'):
             df = pd.read_excel(self.calibration_file, header=None)
 
-        df = df.iloc[:, (i for i in range(len(df.columns)) if i == freq_col_id or i == val_col_id)]
-        df = df[start_data_id:]
-        df = df.dropna(subset=[df.columns[0]])
-        df = df.replace('[A-Za-z:]', '', regex=True).astype(float)
-        df = df.reset_index(drop=True)
-        df.columns = ['frequency', val]
+            df = df.iloc[:, (i for i in range(len(df.columns)) if i == freq_col_id or i == val_col_id)]
+            df = df[start_data_id:]
+            df = df.dropna(subset=[df.columns[0]])
+            df = df.replace('[A-Za-z:]', '', regex=True).astype(float)
+            df = df.reset_index(drop=True)
+            df.columns = ['frequency', val]
 
         self.freq_cal = df
 
@@ -226,13 +235,10 @@ class Hydrophone:
             mv = 10 ** (freq_dep_cal / 20.0) * p_ref
             ma = 10 ** (self.preamp_gain / 20.0) * p_ref
             gain_upa = (self.Vpp / 2.0) / (mv * ma)
-            freq_cal_inc = 10 * np.log10(gain_upa ** 2) - self.end_to_end_calibration()
+            freq_cal_inc = 10 * np.log10(gain_upa**2) - self.end_to_end_calibration()
         elif val == 'end_to_end':
             freq_cal_inc = freq_dep_cal - self.end_to_end_calibration()
-        else:
-            raise ValueError(f'columns name {val} is not implemented. Only end_to_end or sensitivity are valid values')
-        freq_cal_inc = np.concatenate(
-            (np.zeros(frequencies_below.shape), freq_cal_inc, np.zeros(frequencies_above.shape)))
+        freq_cal_inc = np.concatenate((np.zeros(frequencies_below.shape), freq_cal_inc, np.zeros(frequencies_above.shape)))
         df_freq_inc = pd.DataFrame(data=np.vstack((frequencies, freq_cal_inc)).T, columns=['frequency', 'inc_value'])
 
         return df_freq_inc
