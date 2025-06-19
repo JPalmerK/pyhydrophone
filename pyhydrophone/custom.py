@@ -2,7 +2,17 @@
 from pyhydrophone.hydrophone import Hydrophone
 
 from datetime import datetime
+import re
 
+# Define the datetime formats outside the class as a dictionary
+DATE_FORMATS = {
+    r'\d{8}_\d{6}_\d{3}': "%Y%m%d_%H%M%S_%f",  # Format: yyyymmdd_HHMMSS_fff
+    r'\d{8}_\d{6}': "%Y%m%d_%H%M%S",  # Format: yyyymmdd_HHMMSS
+    r'\d{8}T\d{6}': "%Y%m%dT%H%M%S",  # Format: yyyymmddTHHMMSS
+    r'\d{9}\.\d{12}': "%Y%m%d%H%M%S%f",  # Format: 123456789.20230101234567
+    r'\d{4}\.\d{12}': "%Y%m%d%H%M%S%f",  # Format: 2023.20230101234567
+    r'\d{6}-\d{6}\.\d{3}': "%y%m%d-%H%M%S.%f"  # Format: yymmdd-HHMMSS.fff
+}
 
 
 class custom(Hydrophone):
@@ -50,10 +60,19 @@ class custom(Hydrophone):
         file_name : string
             File name (not path) of the file
         """
-        name = file_name.split('.')[0]
-        start_timestamp = name.find('_') + 1
-        date_string = name[start_timestamp::]
-        date = super().get_name_datetime(date_string)
+        # Try matching each pattern in the DATE_FORMATS dictionary
+        for date_pattern, date_format in DATE_FORMATS.items():
+            match = re.search(date_pattern, file_name)
+            if match:
+                print('found a match')
+                DatePattern = date_pattern
+                DateFormat = date_format
+                
+        date_str = re.search(DatePattern, file_name).group(0)
+
+        
+
+        date = super().get_name_datetime(date_str)
         return date
 
     def get_new_name(self, filename, new_date):
